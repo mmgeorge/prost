@@ -96,6 +96,10 @@ impl<'a> CodeGenerator<'a> {
             code_gen.package
         );
 
+        code_gen.write_imports();
+        code_gen.write_typescript_custom_section(&file.message_type);
+        code_gen.write_typescript_externs(&file.message_type);
+
         code_gen.path.push(4);
         for (idx, message) in file.message_type.into_iter().enumerate() {
             code_gen.path.push(idx as i32);
@@ -128,9 +132,106 @@ impl<'a> CodeGenerator<'a> {
         }
     }
 
-    fn append_message(&mut self, message: DescriptorProto) {
-        debug!("  message: {:?}", message.name());
+    fn write_imports(&mut self) {
+        self.path.push(4);
+        self.buf.push_str("use wasm_bindgen::prelude::*;\n\n");
+        self.path.pop();
+    }
+    
 
+    fn write_typescript_custom_section(&mut self, descriptor: &Vec<DescriptorProto>) {
+        self.path.push(4);
+
+        self.buf.push_str("#[wasm_bindgen(typescript_custom_section)]\n");
+        self.buf.push_str("const TS_CUSTOM_SECTION: &'static str = r#\"\n");
+
+        for (idx, message) in descriptor.clone().into_iter().enumerate() {
+            self.path.push(idx as i32);
+            self.append_message_typescript_interface(message);
+            self.path.pop();
+        }
+
+        self.buf.push_str("\"#;\n\n");
+        self.path.pop();
+    }
+
+    fn write_typescript_externs(&mut self, descriptor: &Vec<DescriptorProto>) {
+        self.path.push(4);
+
+        self.buf.push_str("#[wasm_bindgen]\n");
+        self.buf.push_str("extern \"C\" {\n");
+
+        for (idx, message) in descriptor.clone().into_iter().enumerate() {
+            self.path.push(idx as i32);
+            self.write_typescript_extern(message);
+            self.path.pop();
+        }
+
+        self.buf.push_str("}\n\n");
+        self.path.pop();
+    }
+
+    fn write_typescript_extern(&mut self, message: DescriptorProto) {
+        self.buf.push_str(&format!("    #[wasm_bindgen(typescript_type = \"I{}\")]\n", message.name()));
+        self.buf.push_str(&format!("    pub type I{};\n", message.name()));
+    }
+
+    fn append_message_typescript_interface(&mut self, message: DescriptorProto) {
+        let ts_interface_header = format!("\nexport interface I{} {{\n", message.name());
+
+        self.buf.push_str(&ts_interface_header);
+
+        for field in message.field {
+            self.append_typescript_interface_field(field);
+        }
+
+        let ts_interface_footer = format!("}}\n");
+        //let ts_interface = [ts_interface_header, ts_interface_body, ts_interface_footer].join("\n");
+
+        self.buf.push_str(&ts_interface_footer);
+    }
+
+    fn append_typescript_interface_field(&mut self, field: FieldDescriptorProto) {
+        let repeated = field.label == Some(Label::Repeated as i32);
+
+        // We should try to improve the typing for enums
+        //
+        // NOTE - We cannot use tsc enums here as we output a .d.ts
+        // 
+        // match field.r#type() {
+        //     Type::Enum => {
+        //         println!("Enum {:?}, {}", field, self.resolve_ident(field.type_name()))
+        //     }
+        //     _ => {}
+        // };
+        
+        let mut field_type = match field.r#type() {
+            Type::Float | 
+            Type::Double |
+            Type::Uint32 | Type::Fixed32 |
+            Type::Uint64 | Type::Fixed64 |
+            Type::Int32 | Type::Sfixed32 | Type::Sint32 | Type::Enum | 
+            Type::Int64 | Type::Sfixed64 | Type::Sint64 => String::from("number"),
+            Type::Bool => String::from("boolean"),
+            Type::String => String::from("string"),
+            //Type::Bytes => match self.bytes_backing_type(field, msg_name) {
+              //  BytesTy::Bytes => String::from("::prost::bytes::Bytes"),
+                //BytesTyBytesTy::Vec => String::from("::prost::alloc::vec::Vec<u8>"),
+            //},
+            Type::Group | Type::Message => format!("I{}", self.resolve_ident(field.type_name())),
+            _ => panic!("append_typescript_interface_field - Unable to handle type")
+        };
+
+        if repeated {
+            field_type = format!("Array<{}>", field_type)
+        }
+
+        let field = format!("    {}: {};\n", field.name.unwrap(), field_type);
+        
+        self.buf.push_str(&field);
+    }
+
+    fn append_message(&mut self, message: DescriptorProto) {
         let message_name = message.name().to_string();
         let fq_message_name = format!(".{}.{}", self.package, message.name());
 
