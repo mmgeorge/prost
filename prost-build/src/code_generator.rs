@@ -96,6 +96,10 @@ impl<'a> CodeGenerator<'a> {
             code_gen.package
         );
 
+        for message in file.service.clone() {
+            println!("{:?}\n",  message);
+        }
+
         code_gen.write_imports();
         code_gen.write_typescript_custom_section(&file.message_type);
         code_gen.write_typescript_externs(&file.message_type);
@@ -174,6 +178,10 @@ impl<'a> CodeGenerator<'a> {
     fn write_typescript_extern(&mut self, message: DescriptorProto) {
         self.buf.push_str(&format!("    #[wasm_bindgen(typescript_type = \"I{}\")]\n", message.name()));
         self.buf.push_str(&format!("    pub type I{};\n", message.name()));
+
+        // Generate array types for convience 
+        self.buf.push_str(&format!("    #[wasm_bindgen(typescript_type = \"Array<I{}>\")]\n", message.name()));
+        self.buf.push_str(&format!("    pub type I{}Array;\n", message.name()));
     }
 
     fn append_message_typescript_interface(&mut self, message: DescriptorProto) {
